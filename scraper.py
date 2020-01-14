@@ -151,3 +151,6 @@ if __name__ == "__main__":
         print('\nFinished scrape jitta.com')
 
     print('\nFinished')
+
+import pyfolio as pf
+pf.create_returns_tear_sheet()
