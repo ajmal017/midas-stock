@@ -4,8 +4,9 @@ import re
 from functools import partial
 from multiprocessing import Pool, cpu_count
 
-import investpy
 import pandas as pd
+import pandas_datareader.data as web
+import requests_cache
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -67,7 +68,7 @@ def scrape_jitta(df_stock, symbol):
         return symbol
 
     except Exception as e:
-        print('\nError scrape jitta.com:', symbol, 'Error nessage:', str(e))
+        print('\nError scrape jitta.com:', symbol, 'Error message:', str(e))
         return None
 
 
@@ -116,24 +117,7 @@ if __name__ == "__main__":
 
     df_stock = pd.read_excel(file_name, sheet_name=sheet_name, index_col=0)
     df_stock.index = [str(text).upper() for text in df_stock.index]
-    df_stock.loc[['TRUE'], ['Investing', 'Jitta', 'Filename']] = ['TRUE', 'TRUE', 'TRUE']
-
-    investing_filter = []
-    jitta_filter = []
-    for symbol in df_stock.loc[:, 'Filename'].values.tolist():
-        if not os.path.isfile(r'data/investing/{}.csv'.format(symbol)):
-            investing_filter.append(df_stock[df_stock['Filename'] == symbol].index.values[0])
-        if not os.path.isfile(r'data/jitta/{}.csv'.format(symbol)):
-            jitta_filter.append(df_stock[df_stock['Filename'] == symbol].index.values[0])
-
-    for f in os.listdir(r'data/investing'):
-        f = f.replace('.csv', '')
-        if f not in df_stock.loc[:, 'Filename'].values.tolist():
-            print('investing', f)
-    for f in os.listdir(r'data/jitta'):
-        f = f.replace('.csv', '')
-        if f not in df_stock.loc[:, 'Filename'].values.tolist():
-            print('jitta', f)
+    df_stock.loc[['TRUE'], ['Investing', 'Yahoo', 'Jitta', 'Filename']] = ['TRUE', 'TRUE', 'TRUE', 'TRUE']
 
     thread = 4
     thread = thread if thread < cpu_count() else cpu_count()
@@ -146,12 +130,12 @@ if __name__ == "__main__":
 
     try:
         if len(symbol_list) > 0:
-            for symbol in tqdm(pool.imap_unordered(partial(scrape_investing, df_stock, from_date, to_date), symbol_list), total=len(symbol_list)):
+            for symbol in tqdm(pool.imap_unordered(partial(scrape_yahoo, df_stock, start, end), symbol_list), total=len(symbol_list)):
                 pass
     except Exception as e:
-        print('\nError Investing Mainloop:', str(e))
+        print('\nError Yahoo Mainloop:', str(e))
     finally:
-        print('\nFinished scrape investing.com')
+        print('\nFinished scrape finance.yahoo.com')
 
     # Scrape jitta.com
     symbol_list = df_stock.loc[jitta_filter].index.tolist()
