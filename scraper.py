@@ -13,6 +13,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from tqdm import tqdm
+import investpy
 
 pd.set_option('display.max_columns', 100)
 pd.set_option('display.width', 10000)
@@ -24,11 +25,30 @@ def scrape_investing(df_stock, from_date, to_date, symbol):
     try:
         df = investpy.get_stock_historical_data(stock=df_stock.loc[symbol, 'Investing'], country='thailand', from_date=from_date, to_date=to_date, as_json=False, order='ascending')
         df.drop(labels='Currency', axis=1, inplace=True)
-        df.sort_index(ascending=False, inplace=True)
+        df.sort_index(ascending=True, inplace=True)
+        df[['Return']] = df[['Close']].pct_change()
+        df = df.round(6)
         df.to_csv(r'data/investing/' + df_stock.loc[symbol, 'Filename'] + '.csv')
         return symbol
     except Exception as e:
-        print('\nError scrape investing.com:', symbol, 'Error nessage:', str(e))
+        print('\nError scrape investing.com:', symbol, 'Error message:', str(e))
+        return None
+
+
+def scrape_yahoo(df_stock, start, end, symbol):
+    try:
+        expire_after = dt.timedelta(days=3)
+        session = requests_cache.CachedSession(cache_name='cache', backend='sqlite', expire_after=expire_after)
+        df = web.DataReader('{}.bk'.format(df_stock.loc[symbol, 'Yahoo']), 'yahoo', start, end, session=session)
+        df = df.loc[:, ['Open', 'High', 'Low', 'Close', 'Volume', 'Adj Close']]
+        df.sort_index(ascending=True, inplace=True)
+        df = df.round(4)
+        df[['Return']] = df[['Adj Close']].pct_change()
+        df = df.round(6)
+        df.to_csv(r'data/yahoo/' + df_stock.loc[symbol, 'Filename'] + '.csv')
+        return symbol
+    except Exception as e:
+        print('\nError scrape finance.yahoo.com:', symbol, 'Error message:', str(e))
         return None
 
 
@@ -102,15 +122,6 @@ def close_driver(i):
 
 
 if __name__ == "__main__":
-    # Reformat SET Hist Data
-    df_set = pd.read_csv('data/SET Index Historical Data.csv')
-    if df_set.columns.values.tolist() == ['Date', 'Price', 'Open', 'High', 'Low', 'Vol.', 'Change %']:
-        df_set.rename(columns={'Price': 'Close', 'Vol.': 'Volume'}, inplace=True)
-        df_set = df_set.loc[:, ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
-        df_set.loc[:, 'Date'] = pd.to_datetime(df_set.loc[:, 'Date'])
-        df_set.loc[:, 'Volume'] = df_set.loc[:, 'Volume'].str.replace('.', ',').str.replace('B', '0,000,000').str.replace('M', '0,000')
-        df_set.to_csv('data/SET Index Historical Data.csv', index=False)
-
     # Prepare data folder and thread
     file_name = 'stock_list.xlsx'
     sheet_name = 'StockList'
@@ -123,11 +134,54 @@ if __name__ == "__main__":
     thread = thread if thread < cpu_count() else cpu_count()
     pool = Pool(processes=thread)
 
-    # Scrape investing.com
-    symbol_list = df_stock.loc[investing_filter].index.tolist()
-    from_date = '01/01/2000'
-    to_date = (dt.datetime.now() - dt.timedelta(days=1)).strftime('%d/%m/%Y')
+    start = dt.datetime.strptime('30/12/2009', '%d/%m/%Y')
+    end = dt.datetime.now() - dt.timedelta(days=1)
 
+    # Reformat SET Hist Data
+    df_set = pd.read_csv('data/SET Index Historical Data.csv')
+    if df_set.columns.values.tolist() == ['Date', 'Price', 'Open', 'High', 'Low', 'Vol.', 'Change %']:
+        df_set.rename(columns={'Price': 'Close', 'Vol.': 'Volume'}, inplace=True)
+        df_set = df_set.loc[:, ['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Change %']]
+        df_set.loc[:, 'Date'] = pd.to_datetime(df_set.loc[:, 'Date'])
+        for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+            df_set.loc[:, col] = df_set.loc[:, col].str.replace(',', '')
+        df_set.loc[:, 'Volume'] = df_set.loc[:, 'Volume'].str.replace('.', '').str.replace('B', '0000000').str.replace('M', '0000')
+        df_set = df_set.set_index('Date').resample('D').fillna(method='ffill').sort_index(ascending=True).reset_index()
+        df_set.to_csv('data/SET Index Historical Data.csv', index=False)
+
+    # Scrape investing.com
+    investing_filter = []
+    for symbol in df_stock.loc[:, 'Filename'].values.tolist():
+        if not os.path.isfile(r'data/investing/{}.csv'.format(symbol)):
+            investing_filter.append(df_stock[df_stock['Filename'] == symbol].index.values[0])
+    for f in os.listdir(r'data/investing'):
+        f = f.replace('.csv', '')
+        if f not in df_stock.loc[:, 'Filename'].values.tolist():
+            print('investing', f)
+
+    symbol_list = df_stock.loc[investing_filter].index.tolist()
+    try:
+        from_date = start.strftime('%d/%m/%Y')
+        to_date = end.strftime('%d/%m/%Y')
+        if len(symbol_list) > 0:
+            for symbol in tqdm(pool.imap_unordered(partial(scrape_investing, df_stock, from_date, to_date), symbol_list), total=len(symbol_list)):
+                pass
+    except Exception as e:
+        print('\nError Investing Mainloop:', str(e))
+    finally:
+        print('\nFinished scrape investing.com')
+
+    # Scrape finance.yahoo.com
+    yahoo_filter = []
+    for symbol in df_stock.loc[:, 'Filename'].values.tolist():
+        if not os.path.isfile(r'data/yahoo/{}.csv'.format(symbol)):
+            yahoo_filter.append(df_stock[df_stock['Filename'] == symbol].index.values[0])
+    for f in os.listdir(r'data/yahoo'):
+        f = f.replace('.csv', '')
+        if f not in df_stock.loc[:, 'Filename'].values.tolist():
+            print('yahoo', f)
+
+    symbol_list = df_stock.loc[yahoo_filter].index.tolist()
     try:
         if len(symbol_list) > 0:
             for symbol in tqdm(pool.imap_unordered(partial(scrape_yahoo, df_stock, start, end), symbol_list), total=len(symbol_list)):
@@ -138,6 +192,15 @@ if __name__ == "__main__":
         print('\nFinished scrape finance.yahoo.com')
 
     # Scrape jitta.com
+    jitta_filter = []
+    for symbol in df_stock.loc[:, 'Filename'].values.tolist():
+        if not os.path.isfile(r'data/jitta/{}.csv'.format(symbol)):
+            jitta_filter.append(df_stock[df_stock['Filename'] == symbol].index.values[0])
+    for f in os.listdir(r'data/jitta'):
+        f = f.replace('.csv', '')
+        if f not in df_stock.loc[:, 'Filename'].values.tolist():
+            print('jitta', f)
+
     symbol_list = df_stock.loc[jitta_filter].index.tolist()
     try:
         if len(symbol_list) > 0:
@@ -152,5 +215,3 @@ if __name__ == "__main__":
 
     print('\nFinished')
 
-import pyfolio as pf
-pf.create_returns_tear_sheet()
