@@ -1,24 +1,27 @@
 import datetime as dt
 import os
 import re
+import sys
 from functools import partial
 from multiprocessing import Pool, cpu_count
 
+import investpy
 import pandas as pd
 import pandas_datareader.data as web
-import requests_cache
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from tqdm import tqdm
-import investpy
+
+import requests_cache
 
 pd.set_option('display.max_columns', 100)
 pd.set_option('display.width', 10000)
 
 driver = None
+dir_path = os.path.dirname(os.path.realpath(__file__)) + '\\'
 
 
 def scrape_investing(df_stock, from_date, to_date, symbol):
@@ -28,7 +31,7 @@ def scrape_investing(df_stock, from_date, to_date, symbol):
         df.sort_index(ascending=True, inplace=True)
         df[['Return']] = df[['Close']].pct_change()
         df = df.round(6)
-        df.to_csv(r'data/investing/' + df_stock.loc[symbol, 'Filename'] + '.csv')
+        df.to_csv(dir_path + 'data/investing/' + df_stock.loc[symbol, 'Filename'] + '.csv')
         return symbol
     except Exception as e:
         print('\nError scrape investing.com:', symbol, 'Error message:', str(e))
@@ -45,7 +48,7 @@ def scrape_yahoo(df_stock, start, end, symbol):
         df = df.round(4)
         df[['Return']] = df[['Adj Close']].pct_change()
         df = df.round(6)
-        df.to_csv(r'data/yahoo/' + df_stock.loc[symbol, 'Filename'] + '.csv')
+        df.to_csv(dir_path + 'data/yahoo/' + df_stock.loc[symbol, 'Filename'] + '.csv')
         return symbol
     except Exception as e:
         print('\nError scrape finance.yahoo.com:', symbol, 'Error message:', str(e))
@@ -57,7 +60,7 @@ def scrape_jitta(df_stock, symbol):
 
     try:
         if driver is None:
-            driver = webdriver.Chrome(executable_path='chromedriver.exe')
+            driver = webdriver.Chrome(executable_path=dir_path + 'chromedriver.exe')
 
             # Get logged-in cookies
             login_url = 'https://accounts.jitta.com/login'
@@ -84,7 +87,7 @@ def scrape_jitta(df_stock, symbol):
         get_data_to_df(driver, df)
 
         df.replace('- -', '', inplace=True)
-        df.to_csv(r'data/jitta/' + df_stock.loc[symbol, 'Filename'] + '.csv')
+        df.to_csv(dir_path + 'data/jitta/' + df_stock.loc[symbol, 'Filename'] + '.csv')
         return symbol
 
     except Exception as e:
@@ -123,10 +126,9 @@ def close_driver(i):
 
 if __name__ == "__main__":
     # Prepare data folder and thread
-    file_name = 'stock_list.xlsx'
     sheet_name = 'StockList'
 
-    df_stock = pd.read_excel(file_name, sheet_name=sheet_name, index_col=0)
+    df_stock = pd.read_excel(dir_path + 'stock_list.xlsx', sheet_name=sheet_name, index_col=0)
     df_stock.index = [str(text).upper() for text in df_stock.index]
     df_stock.loc[['TRUE'], ['Investing', 'Yahoo', 'Jitta', 'Filename']] = ['TRUE', 'TRUE', 'TRUE', 'TRUE']
 
@@ -138,7 +140,7 @@ if __name__ == "__main__":
     end = dt.datetime.now() - dt.timedelta(days=1)
 
     # Reformat SET Hist Data
-    df_set = pd.read_csv('data/SET Index Historical Data.csv')
+    df_set = pd.read_csv(dir_path + 'data/SET Index Historical Data.csv')
     if df_set.columns.values.tolist() == ['Date', 'Price', 'Open', 'High', 'Low', 'Vol.', 'Change %']:
         df_set.rename(columns={'Price': 'Close', 'Vol.': 'Volume'}, inplace=True)
         df_set = df_set.loc[:, ['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Change %']]
@@ -152,9 +154,9 @@ if __name__ == "__main__":
     # Scrape investing.com
     investing_filter = []
     for symbol in df_stock.loc[:, 'Filename'].values.tolist():
-        if not os.path.isfile(r'data/investing/{}.csv'.format(symbol)):
+        if not os.path.isfile(dir_path + 'data/investing/{}.csv'.format(symbol)):
             investing_filter.append(df_stock[df_stock['Filename'] == symbol].index.values[0])
-    for f in os.listdir(r'data/investing'):
+    for f in os.listdir(dir_path + 'data/investing'):
         f = f.replace('.csv', '')
         if f not in df_stock.loc[:, 'Filename'].values.tolist():
             print('investing', f)
@@ -174,9 +176,9 @@ if __name__ == "__main__":
     # Scrape finance.yahoo.com
     yahoo_filter = []
     for symbol in df_stock.loc[:, 'Filename'].values.tolist():
-        if not os.path.isfile(r'data/yahoo/{}.csv'.format(symbol)):
+        if not os.path.isfile(dir_path + 'data/yahoo/{}.csv'.format(symbol)):
             yahoo_filter.append(df_stock[df_stock['Filename'] == symbol].index.values[0])
-    for f in os.listdir(r'data/yahoo'):
+    for f in os.listdir(dir_path + 'data/yahoo'):
         f = f.replace('.csv', '')
         if f not in df_stock.loc[:, 'Filename'].values.tolist():
             print('yahoo', f)
@@ -194,9 +196,9 @@ if __name__ == "__main__":
     # Scrape jitta.com
     jitta_filter = []
     for symbol in df_stock.loc[:, 'Filename'].values.tolist():
-        if not os.path.isfile(r'data/jitta/{}.csv'.format(symbol)):
+        if not os.path.isfile(dir_path + 'data/jitta/{}.csv'.format(symbol)):
             jitta_filter.append(df_stock[df_stock['Filename'] == symbol].index.values[0])
-    for f in os.listdir(r'data/jitta'):
+    for f in os.listdir(dir_path + 'data/jitta'):
         f = f.replace('.csv', '')
         if f not in df_stock.loc[:, 'Filename'].values.tolist():
             print('jitta', f)
@@ -209,9 +211,9 @@ if __name__ == "__main__":
     except Exception as e:
         print('\nError Jitta Mainloop:', str(e))
     finally:
-        for _ in pool.imap_unordered(close_driver, range(thread)):
-            pass
-        print('\nFinished scrape jitta.com')
+        if len(symbol_list) > 0:
+            for _ in pool.imap_unordered(close_driver, range(thread)):
+                pass
+            print('\nFinished scrape jitta.com')
 
     print('\nFinished')
-
